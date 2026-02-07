@@ -330,20 +330,18 @@ const handleAdminLogin = (e) => {
 
   // --- USER TRACKING ---
   const handleTrack = async () => {
-    try {
-      const response = await fetch(`http://localhost:3001/api/track/${searchRef}`);
-      const data = await response.json();
-     
-      if (data.status === "Not Found") {
-        setTrackResult({ status: 'Not Found', step: 0 });
-      } else {
-        setTrackResult(data);
-      }
-    } catch (error) {
-      console.error("Tracking error:", error);
-      setTrackResult({ status: 'Error', step: 0 });
-    }
-  };
+  if (!searchRef.trim()) return; // Don't search if empty
+  try {
+    const response = await fetch(`http://localhost:3001/api/track/${searchRef.trim()}`);
+    const data = await response.json();
+    
+    // This ensures that even if it's "Not Found", the state updates
+    setTrackResult(data); 
+  } catch (error) {
+    console.error("Tracking error:", error);
+    setTrackResult({ status: 'Error', step: 0 });
+  }
+};
 
 
   const handleSubmit = async (e) => {
@@ -692,17 +690,26 @@ const handleAdminLogin = (e) => {
                               </td>
                               <td className="px-6 py-4">{req.specific_service}</td>
                               <td className="px-6 py-4 text-center">
-                                {req.is_urgent === 'Yes' ? (
+                                {/* If Urgency is 'Yes' */}
+                                {req.is_urgent && req.is_urgent.toString().toLowerCase() === 'yes' ? (
                                   <div className="flex flex-col items-center">
-                                    <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold animate-pulse">
+                                    {/* Removed 'animate-pulse' to make it stay put (static) */}
+                                    <span className="bg-red-600 text-white px-2 py-1 rounded text-[10px] font-black shadow-md uppercase tracking-wider">
                                       URGENT
                                     </span>
-                                    <span className="text-[10px] text-gray-500 mt-1">
-                                      {new Date(req.urgency_deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                    </span>
+                                    {req.urgency_deadline && (
+                                      <span className="text-[10px] text-red-700 mt-1 font-bold">
+                                        Due: {new Date(req.urgency_deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                      </span>
+                                    )}
                                   </div>
                                 ) : (
-                                  <span className="text-gray-400 text-xs">Standard</span>
+                                  /* Handling for 'No' or Standard requests */
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-gray-400 text-[10px] font-bold uppercase tracking-widest border border-gray-200 px-2 py-1 rounded bg-gray-50">
+                                      Standard
+                                    </span>
+                                  </div>
                                 )}
                               </td>
                               <td className="px-6 py-4">
@@ -736,27 +743,54 @@ const handleAdminLogin = (e) => {
                     </table>
                   </div>
                   {/* NEW PAGINATION FOOTER */}
-                  <div className="bg-gray-50 px-6 py-4 border-t flex items-center justify-between">
-                    <p className="text-sm text-gray-600">
-                      Showing page <span className="font-bold text-red-800">{currentPage}</span>
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        disabled={currentPage === 1}
-                        onClick={() => setCurrentPage(prev => prev - 1)}
-                        className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-bold disabled:opacity-30 hover:bg-white transition-all"
-                      >
-                        Previous
-                      </button>
-                      <button
-                        onClick={() => setCurrentPage(prev => prev + 1)}
-                        disabled={adminData.length <= currentPage * recordsPerPage}
-                        className="px-4 py-2 bg-red-800 text-white rounded-lg text-xs font-bold disabled:opacity-30 hover:bg-red-900 transition-all"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
+                  <div className="bg-gray-50 px-6 py-4 border-t flex flex-col md:flex-row items-center justify-between gap-4">
+  {/* Total Count Info */}
+  <p className="text-sm text-gray-600">
+    Showing <span className="font-bold text-red-800">{(currentPage - 1) * recordsPerPage + 1}</span> to{' '}
+    <span className="font-bold text-red-800">{Math.min(currentPage * recordsPerPage, adminData.length)}</span> of{' '}
+    <span className="font-bold">{adminData.length}</span> records
+  </p>
+  
+  {/* Navigation Controls */}
+  <div className="flex items-center gap-1">
+    <button
+      disabled={currentPage === 1}
+      onClick={() => { setCurrentPage(1); window.scrollTo(0,0); }}
+      className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold hover:bg-white disabled:opacity-30 transition-colors"
+    >
+      First
+    </button>
+    
+    <button
+      disabled={currentPage === 1}
+      onClick={() => { setCurrentPage(prev => prev - 1); window.scrollTo(0,0); }}
+      className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold hover:bg-white disabled:opacity-30 transition-colors"
+    >
+      Prev
+    </button>
+
+    {/* Page Counter */}
+      <div className="px-4 py-2 bg-red-900 text-white rounded-lg text-xs font-bold shadow-inner">
+        Page {currentPage} of {Math.ceil(adminData.length / recordsPerPage) || 1}
+      </div>
+
+      <button
+        disabled={currentPage >= Math.ceil(adminData.length / recordsPerPage)}
+        onClick={() => { setCurrentPage(prev => prev + 1); window.scrollTo(0,0); }}
+        className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold hover:bg-white disabled:opacity-30 transition-colors"
+      >
+        Next
+      </button>
+      
+      <button
+        disabled={currentPage >= Math.ceil(adminData.length / recordsPerPage)}
+        onClick={() => { setCurrentPage(Math.ceil(adminData.length / recordsPerPage)); window.scrollTo(0,0); }}
+        className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold hover:bg-white disabled:opacity-30 transition-colors"
+      >
+        Last
+      </button>
+    </div>
+  </div>
                 </div>
               </div>
             )}
