@@ -1,23 +1,28 @@
 const express = require('express');
 const mysql = require('mysql2');
-const cors = require('cors'); 
+const cors = require('cors');
 const bodyParser = require('body-parser');
 const nodemailer = require('nodemailer');
 const QRCode = require('qrcode');
 
+
 const app = express();
+
 
 // --- MIDDLEWARE ---
 app.use(cors()); // This fixes the Connection Error
 app.use(bodyParser.json());
+
 
 // --- 1. DATABASE CONNECTION ---
 const db = mysql.createConnection({
     host: 'localhost',
     user: 'root',
     password: '',
-    database: 'pup_registrar_db'
+    database: 'pup_registrar_db',
+    port: 3306
 });
+
 
 db.connect(err => {
     if (err) {
@@ -26,6 +31,7 @@ db.connect(err => {
         console.log('Connected to MySQL Database');
     }
 });
+
 
 // --- 2. EMAIL CONFIGURATION ---
 const transporter = nodemailer.createTransport({
@@ -36,76 +42,125 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+
 // --- API ROUTES ---
+const getStatusTheme = (status) => {
+    const themes = {
+        'Pending':    { main: '#ca8a04', light: '#fefce8' }, // Gold
+        'Processing': { main: '#a855f7', light: '#faf5ff' }, // Purple
+        'For Pickup': { main: '#1e40af', light: '#eff6ff' }, // Blue
+        'Completed':  { main: '#16a34a', light: '#f0fdf4' }, // Green
+        'Rejected':   { main: '#dc2626', light: '#fef2f2' }, // Red
+        'Default':    { main: '#800000', light: '#f9f9f9' }  // PUP Maroon
+    };
+    return themes[status] || themes['Default'];
+};
+
+const generateEmailHTML = (title, ref, name, service, studentId, college, status, theme) => `
+    <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+        <div style="background: ${theme.main}; color: white; padding: 20px; text-align: center;">
+            <h1 style="margin: 0; font-size: 20px;">${title}</h1>
+            <p style="margin: 5px 0 0 0;">Reference: ${ref}</p>
+        </div>
+        <div style="padding: 20px;">
+            <p>Hi <b>${name}</b>,</p>
+            <div style="background: ${theme.light}; border-left: 5px solid ${theme.main}; padding: 15px; margin: 20px 0;">
+                <h3 style="margin-top: 0; color: #333;">Request Summary</h3>
+                <table style="width: 100%; font-size: 14px;">
+                    <tr><td><b>Service:</b></td><td>${service}</td></tr>
+                    <tr><td><b>Status:</b></td><td style="color: ${theme.main}; font-weight: bold;">${status}</td></tr>
+                    <tr><td><b>Student No:</b></td><td>${studentId}</td></tr>
+                    <tr><td><b>College:</b></td><td>${college}</td></tr>
+                </table>
+            </div>
+            <div style="text-align: center; margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                <p style="font-size: 11px; color: #666;">PRESENT THIS QR CODE AT THE WINDOW</p>
+                <img src="cid:qrcode" style="width: 150px; height: 150px;" />
+            </div>
+        </div>
+    </div>
+`;
 
 // ROUTE 1: Submit Request (User Side)
 app.post('/api/request', async (req, res) => {
-    const { referenceNumber, fullName, studentNumber, email, college, program, serviceCategory, specificService, isUrgent, urgencyDeadline } = req.body;
+    const { fullName, studentNumber, email, college, program, serviceCategory, specificService, isUrgent, urgencyDeadline } = req.body;
 
-    const sql = `INSERT INTO requests (reference_number, full_name, student_number, email, college, program, service_category, specific_service, is_urgent, urgency_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-    const values = [referenceNumber, fullName, studentNumber, email, college, program, serviceCategory, specificService, isUrgent, urgencyDeadline];
 
-    db.query(sql, values, async (err, result) => {
-        if (err) {
-            console.error(err);
-            res.status(500).send('Database Error');
-        } else {
-            // Generate QR Code and Send Email
-            try {
-                const qrCodeImage = await QRCode.toDataURL(referenceNumber);
-                
-                const mailOptions = {
-                    from: '"PUP Registrar" <ange.cole1917@gmail.com>',
-                    to: email,
-                    subject: `Request Confirmation - ${referenceNumber}`,
-                    html: `
-                        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; max-width: 600px;">
-                            <h2 style="color: #800000;">PUP Registrar Request Received</h2>
-                            <p>Hi <strong>${fullName}</strong>,</p>
-                            <p>Your request has been successfully recorded.</p>
-                            
-                            <div style="background-color: #f9f9f9; padding: 15px; margin: 20px 0; border-left: 5px solid #800000;">
-                                <p><strong>Reference Number:</strong> ${referenceNumber}</p>
-                                <p><strong>Status:</strong> Pending</p>
-                            </div>
+    // 1. Generate Date String (YYYYMMDD)
+    const now = new Date();
+    const dateStr = now.getFullYear().toString() +
+                    (now.getMonth() + 1).toString().padStart(2, '0') +
+                    now.getDate().toString().padStart(2, '0');
 
-                            <p>Please save the QR Code below. You may need to present this at the Registrar's Office.</p>
-                            <div style="text-align: center; margin-top: 20px;">
-                                <img src="cid:unique-qrcode-id" alt="QR Code" style="width: 200px; height: 200px;"/>
-                            </div>
-                        </div>
-                    `,
-                    attachments: [
-                        {
-                            filename: 'qrcode.png',
-                            path: qrCodeImage,
-                            cid: 'unique-qrcode-id'
-                        }
-                    ]
-                };
 
-                await transporter.sendMail(mailOptions);
-                console.log(`Confirmation email sent to ${email}`);
-                res.status(200).send('Request saved and email sent');
+    // 2. Count how many requests were made today to get the next number
+    const countSql = "SELECT COUNT(*) as total FROM requests WHERE reference_number LIKE ?";
+    const searchPattern = `PUP-REG-${dateStr}-%`;
 
-            } catch (emailError) {
-                console.error('Email Error:', emailError);
-                // We send 200 because the Data was saved, even if email failed
-                res.status(200).send('Request saved but email failed'); 
+
+    db.query(countSql, [searchPattern], async (countErr, countResults) => {
+        if (countErr) return res.status(500).json({ error: "Database Error" });
+
+
+        // Calculate next number (e.g., 0001, 0002)
+        const nextNumber = (countResults[0].total + 1).toString().padStart(4, '0');
+        const referenceNumber = `PUP-REG-${dateStr}-${nextNumber}`;
+
+
+        // 3. Duplicate Check
+        const checkDuplicateSql = `SELECT * FROM requests WHERE student_number = ? AND specific_service = ? AND status IN ('Pending', 'Processing', 'For Pickup')`;
+       
+        db.query(checkDuplicateSql, [studentNumber, specificService], async (dupErr, dupResults) => {
+            if (dupResults.length > 0) {
+                return res.status(400).json({ error: `You already have an active request for ${specificService}.` });
             }
-        }
+
+
+            // 4. Save the Request
+            const sql = `INSERT INTO requests (reference_number, full_name, student_number, email, college, program, service_category, specific_service, is_urgent, urgency_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            const values = [referenceNumber, fullName, studentNumber, email, college, program, serviceCategory, specificService, isUrgent, urgencyDeadline];
+
+
+            db.query(sql, values, async (err, result) => {
+                try {
+                    const qrCodeImage = await QRCode.toDataURL(referenceNumber);
+                    const theme = getStatusTheme('Pending'); // <--- ADD THIS LINE HERE
+
+                    const mailOptions = {
+                        from: '"PUP Registrar" <ange.cole1917@gmail.com>',
+                        to: email,
+                        subject: `Request Received - ${referenceNumber}`,
+                        html: generateEmailHTML("Request Confirmed", referenceNumber, fullName, specificService, studentNumber, college, 'Pending', theme),
+                        attachments: [{ filename: 'qrcode.png', path: qrCodeImage, cid: 'qrcode' }]
+                    };
+
+                    transporter.sendMail(mailOptions).catch(e => console.error("Email Error:", e));
+
+
+                    // Send referenceNumber and qrCode back to Frontend
+                    res.status(200).json({
+                        message: 'Success',
+                        qrCode: qrCodeImage,
+                        referenceNumber: referenceNumber
+                    });
+                } catch (qrErr) {
+                    res.status(200).json({ message: 'Saved, but QR failed' });
+                }
+            });
+        });
     });
 });
+
 
 // ROUTE 2: Track Request (User Side)
 app.get('/api/track/:ref', (req, res) => {
     const ref = req.params.ref;
     const sql = "SELECT * FROM requests WHERE reference_number = ?";
-    
+   
     db.query(sql, [ref], (err, result) => {
         if (err) return res.json({ error: "DB Error" });
         if (result.length === 0) return res.json({ status: "Not Found" });
-        
+       
         // Map text status to visual step number
         let step = 1;
         const status = result[0].status;
@@ -114,9 +169,11 @@ app.get('/api/track/:ref', (req, res) => {
         if (status === 'Completed') step = 4;
         if (status === 'Rejected') step = 0;
 
+
         return res.json({ status: status, step: step });
     });
 });
+
 
 // ROUTE 3: Get All Requests (Admin Dashboard)
 app.get('/api/admin/requests', (req, res) => {
@@ -130,87 +187,64 @@ app.get('/api/admin/requests', (req, res) => {
     });
 });
 
+
+
+
 // ROUTE 4: Update Status (Admin Dashboard)
 app.post('/api/admin/update-status', (req, res) => {
     const { id, status } = req.body;
 
-    // 1. Get student details first to send email
+
     const getRequestSql = "SELECT * FROM requests WHERE id = ?";
-    
-    db.query(getRequestSql, [id], (err, results) => {
-        if (err || results.length === 0) {
-            console.error(err);
-            return res.status(500).send('Error fetching request details');
-        }
+   
+    db.query(getRequestSql, [id], async (err, results) => {
+        if (err || results.length === 0) return res.status(500).send('Error');
 
-        const requestData = results[0];
-        const studentEmail = requestData.email;
-        const refNum = requestData.reference_number;
-        const fullName = requestData.full_name;
 
-        // 2. Update the database
+        const r = results[0];
+        const qrCodeImage = await QRCode.toDataURL(r.reference_number);
+
+
+        // HEX CODES matching your Admin Dashboard exactly
+        const colors = {
+            'Pending': '#ca8a04',    // Gold
+            'Processing': '#a855f7', // Purple
+            'For Pickup': '#1e40af', // Blue
+            'Completed': '#16a34a',  // Green
+            'Rejected': '#dc2626'    // Red
+        };
+        const activeColor = colors[status] || '#800000';
+
+
         const updateSql = "UPDATE requests SET status = ? WHERE id = ?";
-        
-        db.query(updateSql, [status, id], async (updateErr, updateResult) => {
-            if (updateErr) {
-                console.error(updateErr);
-                return res.status(500).send('Error updating status');
-            }
-
-            // 3. Send Notification Email
+        db.query(updateSql, [status, id], async (upErr) => {
             try {
-                let subjectLine = `Update on Request - ${refNum}`;
-                let messageBody = `Your request status has been updated to: <strong>${status}</strong>.`;
-                let color = "#800000"; // Maroon
-
-                if (status === 'For Pickup') {
-                    subjectLine = `Action Required: Document Ready - ${refNum}`;
-                    messageBody = `Good news! Your requested document is now <strong>Ready for Pickup</strong>. Please visit the Registrar's Office.`;
-                    color = "#28a745"; // Green
-                } else if (status === 'Rejected') {
-                    subjectLine = `Update on Request - ${refNum}`;
-                    messageBody = `We regret to inform you that your request has been <strong>Rejected</strong>. Please contact the office.`;
-                    color = "#dc3545"; // Red
-                } else if (status === 'Completed') {
-                    subjectLine = `Request Completed - ${refNum}`;
-                    messageBody = `Your transaction has been successfully <strong>Completed</strong>. Thank you!`;
-                    color = "#007bff"; // Blue
-                }
+                const qrCodeImage = await QRCode.toDataURL(r.reference_number); // This was missing in your screenshot!
+                const theme = getStatusTheme(status);
 
                 const mailOptions = {
                     from: '"PUP Registrar" <ange.cole1917@gmail.com>',
-                    to: studentEmail,
-                    subject: subjectLine,
-                    html: `
-                        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ddd; max-width: 600px;">
-                            <h2 style="color: ${color};">${subjectLine}</h2>
-                            <p>Hi <strong>${fullName}</strong>,</p>
-                            <p>${messageBody}</p>
-                            
-                            <div style="background-color: #f9f9f9; padding: 15px; margin: 20px 0; border-left: 5px solid ${color};">
-                                <p><strong>Reference Number:</strong> ${refNum}</p>
-                                <p><strong>New Status:</strong> ${status}</p>
-                            </div>
-
-                            <p style="font-size: 12px; color: #666;">This is an automated message.</p>
-                        </div>
-                    `
+                    to: r.email,
+                    subject: `[${status}] Request Update - ${r.reference_number}`,
+                    html: generateEmailHTML(`Status Update: ${status}`, r.reference_number, r.full_name, r.specific_service, r.student_number, r.college, status, theme),
+                    attachments: [{ filename: 'qrcode.png', path: qrCodeImage, cid: 'qrcode' }]
                 };
 
                 await transporter.sendMail(mailOptions);
-                console.log(`Status update sent to ${studentEmail}`);
-                res.status(200).send('Status updated and email sent');
-
-            } catch (emailError) {
-                console.error('Email Error:', emailError);
-                res.status(200).send('Status updated but email failed');
+                res.status(200).send('Updated');
+            } catch (e) { 
+                console.error(e);
+                res.status(200).send('Updated but email failed'); 
             }
+
         });
     });
 });
+
 
 // --- START SERVER ---
 const PORT = 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
