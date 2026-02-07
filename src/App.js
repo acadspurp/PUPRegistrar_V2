@@ -168,7 +168,6 @@ const PUPRegistrarPortal = () => {
       "Transcript of Records (TOR)",
       "Diploma",
       "Course Description",
-      "Other"
     ],
     "2. Certifications - Original Issuance": [
       "Certificate of Graduation",
@@ -177,13 +176,11 @@ const PUPRegistrarPortal = () => {
       "Certificate of General Weighted Average (GWA)",
       "Certificate of Units Earned",
       "Certificate of Graduation with Honors/Ranking",
-      "Other"
     ],
     "3. Transfer & Clearance Documents": [
       "Honorable Dismissal",
       "Transfer Credentials",
       "Certificate of No Pending Disciplinary Case",
-      "Other"
     ],
     "4. Authentication & Verification": [
       "CAV - Diploma",
@@ -191,19 +188,8 @@ const PUPRegistrarPortal = () => {
       "CTC - Diploma",
       "CTC - Transcript of Records (TOR)",
       "CTC - Course Description",
-      "Other"
     ],
-    "5. Special Academic Processes": [
-      "Completion of Incomplete Grade (INC)",
-      "Correction of Name / Civil Status",
-      "Accreditation of Subjects",
-      "Application for Graduation",
-      "Application for Shifting",
-      "Application for Readmission",
-      "Application for Leave of Absence (LOA)",
-      "Permit to Cross-Enroll",
-      "Withdrawal of Enrollment"
-    ]
+    
   };
 
 
